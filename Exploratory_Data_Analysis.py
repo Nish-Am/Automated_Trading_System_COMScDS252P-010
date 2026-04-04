@@ -1,12 +1,13 @@
 import pandas as pd
 import matplotlib.pyplot as plt
 import boto3
+import io
 
 # ------------- EDA ----------------------
 def market_analysis(tesla_trading_data):    
 
     tesla_trading_data['Date'] = pd.to_datetime(
-    tesla_trading_data['Date'], utc = True
+    tesla_trading_data['Date'], utc = True  
     ).dt.date
 
     tesla_trading_data.set_index('Date', inplace = True)
@@ -48,6 +49,14 @@ def market_analysis(tesla_trading_data):
     # Low volatility → Stable
     volatility = tesla_trading_data['Returns'].std()
 
+    def get_market_trend(row):
+        if row['MA_20'] > row['MA_50']:
+            return 'UP'
+        elif row['MA_20'] < row['MA_50']:
+            return 'DOWN'
+        else:
+            return 'SIDEWAYS'
+
     # create desicion row 
     def decision(row):
         if row['MA_20'] > row['MA_50'] and row['RSI_14'] < 30:
@@ -55,8 +64,9 @@ def market_analysis(tesla_trading_data):
         elif row['MA_20'] < row['MA_50'] and row['RSI_14'] > 70:
             return 'SELL'
         else:
-            return 'HOLD'
-
+            return 'HOLD'       
+    
+    tesla_trading_data['Trend'] = tesla_trading_data.apply(get_market_trend, axis=1)
     tesla_trading_data['Decision'] = tesla_trading_data.apply(decision, axis=1)
 
     # buy sell signals 
@@ -93,7 +103,7 @@ def backtesting(tesla_trading_data):
     plt.ylabel('Cumulative Returns')
     plt.legend()
     plt.grid(True)
-    plt.show()
+    # plt.show()
 
     market_return = tesla_trading_data['Cumulative_Market'].iloc[-1] - 1
     strategy_return = tesla_trading_data['Cumulative_Strategy'].iloc[-1] - 1
@@ -146,7 +156,50 @@ def risk_management(tesla_trading_data):
     
     return tesla_trading_data
 
+def save_output_to_s3(latest_row, bucket, key):
+    s3 = boto3.client('s3')
+    
+    try:
+        # Try reading existing file
+        obj = s3.get_object(Bucket=bucket, Key=key)
+        existing_data = pd.read_csv(io.BytesIO(obj['Body'].read()))
+    except:
+        # If file doesn't exist, create new
+        existing_data = pd.DataFrame(columns=['Date', 'Trend', 'Decision'])
+
+    # Create new row
+    new_row = pd.DataFrame([{
+        'Date': latest_row.name,
+        'Trend': latest_row['Trend'],
+        'Decision': latest_row['Decision']
+    }])
+
+    # Append
+    updated_data = pd.concat([existing_data, new_row], ignore_index=True)
+
+    # Upload back to S3
+    csv_buffer = io.StringIO()
+    updated_data.to_csv(csv_buffer, index=False)
+
+    s3.put_object(
+        Bucket=bucket,
+        Key=key,
+        Body=csv_buffer.getvalue()
+    )
+
 tesla_trading_data = pd.read_csv('data/raw_data/tsla_raw_data.csv')
 tesla_trading_data = market_analysis(tesla_trading_data)
 tesla_trading_data = risk_management(tesla_trading_data)
 tesla_trading_data = backtesting(tesla_trading_data)
+
+latest = tesla_trading_data.iloc[-1]
+
+# save locally 
+with open('E:\MSc Data Science\Principals of DS\course work\Individual_Work_02\Automated_Trading_System_COMScDS252P-010\data\outputs\output.txt', 'a') as f:
+    f.write(f"{latest.name} | {latest['Trend']} | {latest['Decision']}\n")
+
+# save in S3 
+save_output_to_s3(latest_row = latest, bucket = 'ac-trading-data', key = 'outputs/daily_output.csv')
+
+# with open('/home/ubuntu/Automated-Trading-System/daily_output.txt', 'a') as f:
+#     f.write(f"{latest.name} | {latest['Trend']} | {latest['Decision']}\n")

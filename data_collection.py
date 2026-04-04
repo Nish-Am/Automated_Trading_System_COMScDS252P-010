@@ -1,6 +1,5 @@
 import yfinance as yf
 import boto3
-import os
 
 def fetch_data():
     stock = yf.Ticker('TSLA')
@@ -10,16 +9,7 @@ def fetch_data():
 
 def upload_data():
     s3 = boto3.client('s3')
-    response = s3.list_buckets()
+    s3.upload_file('data/raw_data/tsla_raw_data.csv', 'ac-trading-data', 'raw/tsla_raw_data.csv')
 
 fetch_data()
-# print(os.getcwd())
-
-s3 = boto3.client('s3')
-s3.upload_file('data/raw_data/tsla_raw_data.csv', 'ac-trading-data', 'raw/tsla_raw_data.csv')
-# response = s3.list_buckets()
-
-# print(response)
-
-# for bucket in response['Buckets']: 
-#     print(bucket['Name'])
+upload_data()
